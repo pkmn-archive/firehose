@@ -1,0 +1,51 @@
+{
+  "private": true,
+  "repository": "github:pkmn/firehose",
+  "license": "MIT",
+  "dependencies": {
+    "@pkmn/eslint-config": "^1.2.0",
+    "@types/node": "^16.0.1",
+    "@types/node-fetch": "^2.5.11",
+    "@types/ws": "^7.4.6",
+    "@typescript-eslint/eslint-plugin": "^4.28.2",
+    "@typescript-eslint/parser": "^4.28.2",
+    "eslint": "^7.30.0",
+    "eslint-plugin-import": "^2.23.4",
+    "eslint-plugin-jest": "^24.3.6",
+    "json-stringify-pretty-compact": "^3.0.0",
+    "node-fetch": "^2.6.1",
+    "reconnecting-websocket": "^4.4.0",
+    "source-map-support": "^0.5.19",
+    "typescript": "^4.3.5",
+    "wrapr": "^0.0.2",
+    "ws": "^7.5.2"
+  },
+  "optionalDependencies": {
+    "bufferutil": "^4.0.3",
+    "utf-8-validate": "^5.0.5"
+  },
+  "scripts": {
+    "lint": "eslint --cache *.ts",
+    "fix": "eslint --fix *.ts",
+    "compile": "tsc -p .",
+    "prestart": "npm run compile",
+    "start": "node build/index",
+    "prepare": "npm run compile"
+  },
+  "eslintConfig": {
+    "extends": "@pkmn",
+    "overrides": [
+      {
+        "files": [
+          "*.ts"
+        ],
+        "rules": {
+          "@typescript-eslint/no-unused-vars": "off",
+          "@typescript-eslint/no-floating-promises": 0,
+          "@typescript-eslint/no-misused-promises": 0,
+          "@typescript-eslint/no-shadow": 0
+        }
+      }
+    ]
+  }
+}

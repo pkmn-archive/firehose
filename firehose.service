@@ -1,0 +1,19 @@
+[Unit]
+Description=firehose
+Requires=network.target
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/home/deploy/pkmn/firehose
+ExecStart=/usr/bin/npm start
+StartLimitInterval=0
+Restart=always
+RestartSec=5s
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=firehose
+
+[Install]
+WantedBy=multi-user.target
