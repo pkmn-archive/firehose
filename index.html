@@ -448,11 +448,12 @@
           };
           render();
 
+          const stale = format.endsWith('1v1') ? 3 : 15;
           setTimeout(() => {
             $battles.removeChild(battle);
             clearTimeout(timers.battles[battle.id]);
             delete timers.battles[battle.id];
-          }, (time + 15 * 60 * 1000) - Date.now());
+          }, (time + stale * 60 * 1000) - Date.now());
 
           let inserted = false;
           if ($battles.hasChildNodes()) {
