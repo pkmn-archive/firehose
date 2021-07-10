@@ -39,6 +39,12 @@
       .card:hover {
         background-color: #fafafa;
       }
+      .new .card {
+        background-color: #fff9c4;
+      }
+      .new .card:hover {
+        background-color: #fff59d;
+      }
       @media(max-width: 768px) {
         #content {
           font-size: 0.85em;
@@ -440,9 +446,11 @@
             time,
           });
 
+          if (Date.now() - time < 60 * 1000) battle.classList.add('new');
           const render = () => {
             const [text, update] = timeAgo.format(time, 'twitter', {getTimeToNextUpdate: true});
             e.textContent = text;
+            if (!text.endsWith('s')) battle.classList.remove('new');
             timers.battles[data.id] =
               setTimeout(render, Math.min(update || 60 * 1000, SET_TIMEOUT_MAX_SAFE_INTERVAL));
           };
@@ -486,9 +494,11 @@
             time,
           });
 
+          if (Date.now() - time < 60 * 1000) replay.classList.add('new');
           const render = () => {
             const [text, update] = timeAgo.format(time, 'twitter', {getTimeToNextUpdate: true});
             e.textContent = text;
+            if (!text.endsWith('s')) replay.classList.remove('new');
             timers.replays[data.id] =
               setTimeout(render, Math.min(update || 60 * 1000, SET_TIMEOUT_MAX_SAFE_INTERVAL));
           };
