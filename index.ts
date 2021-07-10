@@ -23,7 +23,7 @@ interface Replay {
   p1: string;
   p2: string;
   uploadtime: number;
-  rating: number;
+  rating: number | 'tour';
 }
 
 const getText = wrapr.retrying(wrapr.throttling(async (url: string) => (await fetch(url)).text()));
@@ -217,15 +217,17 @@ function report(type: 'battle' | 'replay', data: Battle | Replay) {
     if (type === 'replay') {
       const replay = data as Replay;
       const url = `https://replay.pokemonshowdown.com/${replay.id}`;
-      const [format] = replay.id.split('-');
-      console.log(`[${format}] ${replay.p1} vs. ${replay.p2} (rating: ${replay.rating}): ${url}`);
+      const rating = replay.rating === 'tour' ? 'Tour' : `rating: ${replay.rating}`;
+      const format = replay.id.split('-')[+(replay.rating === 'tour')];
+      console.log(`[${format}] ${replay.p1} vs. ${replay.p2} (${rating}): ${url}`);
     } else {
       const battle = data as Battle;
-      const url = data.rating === 'tour'
+      const url = battle.rating === 'tour'
         ? `http://smogtours.psim.us/${battle.id}`
         : `https://play.pokemonshowdown.com/${battle.id}`;
+      const rating = battle.rating === 'tour' ? 'Tour' : `rating: ${battle.rating}`;
       const [_, format] = battle.id.split('-');
-      console.log(`[${format}] ${battle.p1} vs. ${battle.p2} (rating: ${battle.rating}): ${url}`);
+      console.log(`[${format}] ${battle.p1} vs. ${battle.p2} (${rating}): ${url}`);
     }
   }
 }
@@ -322,28 +324,29 @@ async function main(first?: boolean) {
           const response = await getText(`${url}.json`);
           if (response.startsWith('{')) {
             const replay = JSON.parse(response) as Replay & Record<string, string>;
-            if (!replay.rating) continue;
-            if (replay.rating >= state.rankings![format]) {
-              delete replay.log;
-              delete replay.inputlog;
-              delete replay.views;
-              delete replay.format;
-              delete replay.formatid;
-              delete replay.p1id;
-              delete replay.p2id;
-              delete replay.private;
-              delete replay.password;
+            const tours = replay.id.startsWith('smogtours');
+            if (!(tours || (replay.rating && replay.rating >= state.rankings![format]))) continue;
+            delete replay.log;
+            delete replay.inputlog;
+            delete replay.views;
+            delete replay.format;
+            delete replay.formatid;
+            delete replay.p1id;
+            delete replay.p2id;
+            delete replay.private;
+            delete replay.password;
 
-              state.replays[format] = state.replays[format] || [];
-              state.replays[format].push(replay);
-              if (state.replays[format].length > state.n) state.replays[format].shift();
+            replay.rating = tours ? 'tour' : replay.rating;
 
-              state.replays._ = state.replays._ || [];
-              state.replays._.push(replay);
-              if (state.replays._.length > state.stale) state.replays._.shift();
+            state.replays[format] = state.replays[format] || [];
+            state.replays[format].push(replay);
+            if (state.replays[format].length > state.n) state.replays[format].shift();
 
-              report('replay', replay);
-            }
+            state.replays._ = state.replays._ || [];
+            state.replays._.push(replay);
+            if (state.replays._.length > state.stale) state.replays._.shift();
+
+            report('replay', replay);
           }
         } catch (err) {
           // Ignore - the replay could have been deleted or made private.

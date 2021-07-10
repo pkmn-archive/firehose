@@ -425,7 +425,8 @@
             ? `http://smogtours.psim.us/${data.id}`
             : `https://play.pokemonshowdown.com/${data.id}`
           const [_, format] = data.id.split('-');
-          console.log(`[${format}] ${data.p1} vs. ${data.p2} (rating: ${data.rating}): ${url}`);
+          const rating = data.rating === 'tour' ? 'Tour' : `rating: ${data.rating}`;
+          console.log(`[${format}] ${data.p1} vs. ${data.p2} (${rating}): ${url}`);
 
           if (document.getElementById(data.id)) return;
           const time = data.starttime * 1000;
@@ -468,8 +469,9 @@
 
         const addReplay = data => {
           const url = `https://replay.pokemonshowdown.com/${data.id}`;
-          const [format] = data.id.split('-');
-          console.log(`[${format}] ${data.p1} vs. ${data.p2} (rating: ${data.rating}): ${url}`);
+          const format = data.id.split('-')[+(data.rating === 'tour')];
+          const rating = data.rating === 'tour' ? 'Tour' : `rating: ${data.rating}`;
+          console.log(`[${format}] ${data.p1} vs. ${data.p2} (${rating}): ${url}`);
 
           if (document.getElementById(data.id)) return;
           const time = data.uploadtime * 1000;
