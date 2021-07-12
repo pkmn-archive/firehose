@@ -223,7 +223,7 @@
             ? 'Tour' : rating
               ? `rating: ${rating}`
               : 'Unrated';
-          const format = id.split('-')[type === 'battle' ? 1 : +(rating === 'tour')];
+          const format = id.split('-')[type === 'battle' ? 1 : +(threshold === 'tour')];
           console.log(`[${format}] ${p1} vs. ${p2} (${scope}): ${url}`);
 
           if (document.getElementById(id)) return;
