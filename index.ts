@@ -11,19 +11,13 @@ import ReconnectingWebSocket from 'reconnecting-websocket';
 
 type Rankings = [number, number, number, number, number];
 interface Index {[file: string]: [number, number]}
-interface Battle {
+interface Data {
   id: string;
   p1: string;
   p2: string;
-  starttime: number;
-  rating: number | 'tour';
-}
-interface Replay {
-  id: string;
-  p1: string;
-  p2: string;
-  uploadtime: number;
-  rating: number | 'tour';
+  time: number;
+  rating?: number;
+  threshold: number | 'tour';
 }
 
 const getText = wrapr.retrying(wrapr.throttling(async (url: string) => (await fetch(url)).text()));
@@ -38,9 +32,9 @@ let state: {
   backfill: number;
   rankings?: {[format: string]: number};
   stale: number;
-  battles: Battle[];
+  battles: Data[];
   n: number;
-  replays: {[format: string]: Replay[]};
+  replays: {[format: string]: {recent: Data[]; best: Data[]}};
   last: {replay: number; battle: {main: number; tours: number}};
 } = {
   backfill: 10,
@@ -74,30 +68,36 @@ for (const s in sockets) {
       try {
         const battles = JSON.parse(data.slice(QUERYRESPONSE.length)).rooms;
         for (const id in battles) {
+          const battle = battles[id];
           const [_, format, n] = id.split('-');
           const num = Number(n);
+
           if (state.last.battle[server] && state.last.battle[server] >= num) continue;
           if (state.last.battle[server] < num) state.last.battle[server] = num;
-          if (!state.rankings![format]) continue;
-          if (server === 'tours' && !isNaN(battles[id].minElo)) continue;
-          if (server === 'main' &&
-            (isNaN(battles[id].minElo) || battles[id].minElo < state.rankings![format])) {
-            continue;
-          }
-          const rating = server === 'tours' ? 'tour' : battles[id].minElo;
-          delete battles[id].minElo;
-          delete battles[id].format;
-          const battle: Battle = {id, ...battles[id], rating, starttime};
+
+          const threshold = state.rankings![format];
+          if (!threshold) continue;
+
+          const data: Data = {
+            id,
+            p1: battle.p1,
+            p2: battle.p2,
+            time: starttime,
+            rating: isNaN(battle.minElo) ? undefined : battle.minElo,
+            threshold: server === 'tours' ? 'tour' : threshold,
+          };
 
           let stale = 0;
           for (const b of state.battles) {
-            if (starttime - b.starttime > state.stale) stale++;
+            if (starttime - b.time > state.stale) stale++;
           }
-          // BUG: technically might not be perfectly ordered since two different data sources...
           state.battles.splice(0, stale);
-          state.battles.push(battle);
+          state.battles.push(data);
+          // Because these battles come in from both main and tours we can't guarantee they are
+          // correctly sorted so we must manually sort.
+          state.battles.sort((a, b) => a.time - b.time);
 
-          report('battle', battle);
+          report('battle', data);
         }
       } catch (err) {
         console.error(`Error handling queryresponse: '${data}':`, err);
@@ -135,6 +135,7 @@ export class TimedCounter extends Map<string, [number, number]> {
 
 const banned = new Set();
 const connections = new TimedCounter();
+const all = new Set<WebSocket>();
 
 const wss = new WebSocket.Server({port: +process.argv[2] || 9119});
 wss.on('connection', (ws: WebSocket & {isAlive?: boolean}, req) => {
@@ -159,11 +160,7 @@ wss.on('connection', (ws: WebSocket & {isAlive?: boolean}, req) => {
     return;
   }
 
-  const backlog = {
-    battles: state.battles.slice(-state.backfill),
-    replays: state.replays._ ? state.replays._.slice(-state.backfill) : [],
-  };
-  ws.send(JSON.stringify(backlog));
+  ws.send(backfill());
 
   ws.on('message', message => {
     if (!message) return;
@@ -172,14 +169,34 @@ wss.on('connection', (ws: WebSocket & {isAlive?: boolean}, req) => {
       console.error(`Dropping message greater than 1KB: ${message.slice(0, 160)}`);
       return;
     }
-    const data = {battles: [] as Battle[], replays: state.replays[message]};
-    for (const battle of state.battles) {
-      const [_, format] = battle.id.split('-');
-      if (format === message) data.battles.push(battle);
+    if (message === '*') {
+      all.add(ws);
+      ws.send(backfill(false));
+    } else if (message === '^') {
+      all.delete(ws);
+    } else {
+      const data = backfill(!all.has(ws), message);
+      if (data) ws.send(data);
     }
-    ws.send(JSON.stringify(data));
   });
+
+  ws.on('close', () => all.delete(ws));
 });
+
+function backfill(best = true, format?: string) {
+  let battles = state.battles;
+  if (format) battles = battles.filter(b => b.id.split('-')[1] === format);
+  if (best) battles = battles.filter(isBest);
+  if (!format) battles = battles.slice(-state.backfill);
+
+  let replays = state.replays[format || '_']?.[best ? 'best' : 'recent'] || [];
+  if (!format) replays = replays.slice(-state.backfill);
+
+  return [
+    ...battles.map(b => toProtocol('battle', b)),
+    ...replays.map(r => toProtocol('replay', r)),
+  ].join('\n');
+}
 
 const interval = setInterval(() => {
   for (const ws of wss.clients) {
@@ -207,27 +224,39 @@ function schedule() {
   }, +next - +now);
 }
 
-function report(type: 'battle' | 'replay', data: Battle | Replay) {
-  const message = JSON.stringify(data);
+function toProtocol(type: 'battle' | 'replay', data: Data) {
+  const parts = [type, data.id, data.p1, data.p2, data.time, data.rating];
+  if (data.threshold !== 'tour') parts.push(data.threshold);
+  return parts.join('|');
+}
+
+function isBest(data: Data) {
+  return ((data.threshold === 'tour' && !data.rating) ||
+    (data.rating && data.rating >= data.threshold));
+}
+
+function report(type: 'battle' | 'replay', data: Data) {
+  const best = isBest(data);
+  const message = toProtocol(type, data);
   for (const client of wss.clients) {
-    if (client.readyState === WebSocket.OPEN) client.send(message);
+    if (client.readyState === WebSocket.OPEN && (best || all.has(client))) {
+      client.send(message);
+    }
   }
 
   if (process.env.DEBUG) {
+    const rating =
+      data.threshold === 'tour' ? 'Tour' : data.rating ? `rating: ${data.rating}` : 'Unrated';
     if (type === 'replay') {
-      const replay = data as Replay;
-      const url = `https://replay.pokemonshowdown.com/${replay.id}`;
-      const rating = replay.rating === 'tour' ? 'Tour' : `rating: ${replay.rating}`;
-      const format = replay.id.split('-')[+(replay.rating === 'tour')];
-      console.log(`[${format}] ${replay.p1} vs. ${replay.p2} (${rating}): ${url}`);
+      const url = `https://replay.pokemonshowdown.com/${data.id}`;
+      const format = data.id.split('-')[+(data.threshold === 'tour')];
+      console.log(`${best ? '*' : ' '} [${format}] ${data.p1} vs. ${data.p2} (${rating}): ${url}`);
     } else {
-      const battle = data as Battle;
-      const url = battle.rating === 'tour'
-        ? `http://smogtours.psim.us/${battle.id}`
-        : `https://play.pokemonshowdown.com/${battle.id}`;
-      const rating = battle.rating === 'tour' ? 'Tour' : `rating: ${battle.rating}`;
-      const [_, format] = battle.id.split('-');
-      console.log(`[${format}] ${battle.p1} vs. ${battle.p2} (${rating}): ${url}`);
+      const url = data.threshold === 'tour'
+        ? `http://smogtours.psim.us/${data.id}`
+        : `https://play.pokemonshowdown.com/${data.id}`;
+      const [_, format] = data.id.split('-');
+      console.log(`${best ? '*' : ' '} [${format}] ${data.p1} vs. ${data.p2} (${rating}): ${url}`);
     }
   }
 }
@@ -315,42 +344,45 @@ async function main(first?: boolean) {
     const response = await getText(url);
     // Sadly, Pokémon Showdown will simply return plain text on error.
     if (response.startsWith('[')) {
-      const json = JSON.parse(response) as Array<Replay & Record<string, string>>;
+      const json = JSON.parse(response);
       for (const {id, uploadtime, format} of json) {
         if (uploadtime <= state.last.replay) break;
-        if (!state.rankings![format]) continue;
+        const threshold = state.rankings![format];
+        if (!threshold) continue;
         try {
-          const url = `https://replay.pokemonshowdown.com/${id}`;
+          const url = `https://replay.pokemonshowdown.com/${id as string}`;
           const response = await getText(`${url}.json`);
           if (response.startsWith('{')) {
-            const replay = JSON.parse(response) as Replay & Record<string, string>;
-            const tours = replay.id.startsWith('smogtours');
-            if (!(tours || (replay.rating && replay.rating >= state.rankings![format]))) continue;
-            delete replay.log;
-            delete replay.inputlog;
-            delete replay.views;
-            delete replay.format;
-            delete replay.formatid;
-            delete replay.p1id;
-            delete replay.p2id;
-            delete replay.private;
-            delete replay.password;
+            const replay = JSON.parse(response);
 
-            replay.rating = tours ? 'tour' : replay.rating;
+            const data: Data = {
+              id,
+              p1: replay.p1,
+              p2: replay.p2,
+              time: replay.uploadtime,
+              rating: isNaN(replay.rating) || replay.rating === 0 ? undefined : replay.rating,
+              threshold: replay.id.startsWith('smogtours') ? 'tour' : threshold,
+            };
 
-            state.replays[format] = state.replays[format] || [];
-            state.replays[format].push(replay);
-            if (state.replays[format].length > state.n) state.replays[format].shift();
+            state.replays[format] = state.replays[format] || {best: [], recent: []};
+            state.replays._ = state.replays._ || {best: [], recent: []};
+            if (isBest(data)) {
+              state.replays[format].best.push(data);
+              state.replays._ .best.push(data);
+            }
+            state.replays[format].recent.push(data);
+            state.replays._.recent.push(data);
 
-            state.replays._ = state.replays._ || [];
-            state.replays._.push(replay);
-            if (state.replays._.length > state.stale) state.replays._.shift();
+            if (state.replays[format].best.length > state.n) state.replays[format].best.shift();
+            if (state.replays[format].recent.length > state.n) state.replays[format].recent.shift();
+            if (state.replays._.best.length > state.stale) state.replays._.best.shift();
+            if (state.replays._.recent.length > state.stale) state.replays._.recent.shift();
 
-            report('replay', replay);
+            report('replay', data);
           }
         } catch (err) {
           // Ignore - the replay could have been deleted or made private.
-          console.error(`Error fetching ${id}:`, err);
+          console.error(`Error fetching ${id as string}:`, err);
         }
       }
       if (Array.isArray(json) && json.length) state.last.replay = json[0].uploadtime;
