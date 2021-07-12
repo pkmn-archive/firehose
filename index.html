@@ -247,9 +247,16 @@
           if (type === 'battle') {
             const stale = format.endsWith('1v1') ? 3 : 15;
             setTimeout(() => {
-              $battles.removeChild(battle);
-              clearTimeout(timers.battles[battle.id]);
-              delete timers.battles[battle.id];
+              if ($battles.hasChildNodes()) {
+                for (const li of $battles.childNodes) {
+                  if (li.id === id) {
+                    $battles.removeChild(li);
+                    clearTimeout(timers.battle[id]);
+                    delete timers.battle[id];
+                    break;
+                  }
+                }
+              }
             }, (time + stale * 60 * 1000) - Date.now());
           }
 
@@ -268,7 +275,12 @@
           if (type === 'replay') {
             if ($replays.childNodes.length > N) $replays.removeChild($replays.lastChild);
           } else if (ALL) {
-            if ($battles.childNodes.length > N) $battles.removeChild($battles.lastChild);
+            if ($battles.childNodes.length > N) {
+              const child = $battles.lastChild;
+              $battles.removeChild(child);
+              clearTimeout(timers.battle[child.id]);
+              delete timers.battle[child.id];
+            }
           }
         };
 
