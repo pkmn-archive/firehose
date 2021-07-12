@@ -21,7 +21,9 @@ interface Data {
 }
 
 const getText = wrapr.retrying(wrapr.throttling(async (url: string) => (await fetch(url)).text()));
-const getJSON = wrapr.retrying(wrapr.throttling(async (url: string) => (await fetch(url)).json()));
+const getJSON = wrapr.retrying(wrapr.throttling(
+  async (url: string) => (await fetch(url)).json(), 10, 5 * 1000
+), 10, 10 * 1000);
 
 const DATA = path.resolve(__dirname, '../data');
 const STATE = process.argv[2]
@@ -217,10 +219,12 @@ function schedule() {
   const next = new Date();
   // 00:00:02 tomorrow morning
   next.setUTCHours(24, 0, 2, 0);
-  setTimeout(async () => {
+  setTimeout(() => {
     schedule();
-    state.rankings = await getRankings();
-    console.log(`Updated rankings for ${formatDate(now)}`);
+    wrapr.retrying(async () => {
+      state.rankings = await getRankings();
+      console.log(`Updated rankings for ${formatDate(now)}`);
+    }, 5, 30 * 60 * 1000)(0);
   }, +next - +now);
 }
 
